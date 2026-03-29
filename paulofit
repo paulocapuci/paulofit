@@ -1,0 +1,420 @@
+import { useState, useEffect, useRef } from “react”;
+
+const FAVORITES = [
+{ id:“alcatra”, emoji:“🥩”, name:“Alcatra”, unit:“g”, per100:{ kcal:160, prot:20, carbo:0, gord:9 } },
+{ id:“sassami”, emoji:“🐓”, name:“Sassami”, unit:“g”, per100:{ kcal:109, prot:23, carbo:0, gord:1.5 } },
+{ id:“file_peito”, emoji:“🍗”, name:“Filé de Peito”, unit:“g”, per100:{ kcal:165, prot:31, carbo:0, gord:3.6 } },
+{ id:“arroz”, emoji:“🍚”, name:“Arroz Branco”, unit:“g”, per100:{ kcal:138, prot:2.7, carbo:30, gord:0.2 } },
+{ id:“tomate”, emoji:“🍅”, name:“Tomate”, unit:“g”, per100:{ kcal:18, prot:0.9, carbo:3.9, gord:0.2 } },
+{ id:“milho”, emoji:“🌽”, name:“Milho Quero”, unit:“g”, per100:{ kcal:70, prot:2.1, carbo:14, gord:0.6 } },
+{ id:“batavo”, emoji:“🥛”, name:“Batavo Grego”, unit:“g”, per100:{ kcal:46, prot:8.5, carbo:2.5, gord:0.4 } },
+{ id:“whey”, emoji:“💊”, name:“Whey Dark Lab”, unit:“g”, per100:{ kcal:367, prot:65, carbo:21.3, gord:1.25 } },
+{ id:“leite”, emoji:“🫙”, name:“Leite Integral”, unit:“g”, per100:{ kcal:63, prot:2.9, carbo:5.9, gord:3.2 } },
+{ id:“ovo”, emoji:“🥚”, name:“Ovo cozido”, unit:“un”, perUnit:{ kcal:77, prot:6.3, carbo:0.6, gord:5.3 } },
+{ id:“banana”, emoji:“🍌”, name:“Banana”, unit:“un”, perUnit:{ kcal:89, prot:1.1, carbo:23, gord:0.3 } },
+{ id:“maca”, emoji:“🍎”, name:“Maçã T. Mônica”, unit:“un”, perUnit:{ kcal:52, prot:0.3, carbo:14, gord:0.2 } },
+{ id:“pao”, emoji:“🍞”, name:“Pão Integral”, unit:“un”, perUnit:{ kcal:69, prot:2.7, carbo:12, gord:1 } },
+{ id:“snickers”, emoji:“🍫”, name:“Snickers White”, unit:“un”, perUnit:{ kcal:209, prot:2, carbo:27, gord:10 } },
+{ id:“feijao”, emoji:“🫘”, name:“Feijão Cozido”, unit:“g”, per100:{ kcal:77, prot:4.8, carbo:14, gord:0.5 } },
+];
+
+const MEALS = [“☀️ Manhã”,“🍽️ Almoço”,“🥪 Lanche”,“🌙 Janta”,“🥤 Shake”];
+const TODAY = new Date().toISOString().split(“T”)[0];
+
+const calcMacros = (fav, qty) => {
+if (!qty || qty <= 0) return null;
+if (fav.unit === “un”) {
+const p = fav.perUnit;
+return { kcal:p.kcal*qty, prot:p.prot*qty, carbo:p.carbo*qty, gord:p.gord*qty };
+}
+const r = qty/100, p = fav.per100;
+return { kcal:p.kcal*r, prot:p.prot*r, carbo:p.carbo*r, gord:p.gord*r };
+};
+
+export default function PauloFit() {
+const [tab, setTab] = useState(“home”);
+const [dayType, setDayType] = useState(“rest”);
+const [workoutType, setWorkoutType] = useState(””);
+const [creatina, setCreatina] = useState(false);
+const [foods, setFoods] = useState([]);
+const [modal, setModal] = useState(null);
+const [selFav, setSelFav] = useState(null);
+const [selMeal, setSelMeal] = useState(MEALS[1]);
+const [qty, setQty] = useState(””);
+const [tempDay, setTempDay] = useState(“rest”);
+const [tempWo, setTempWo] = useState(””);
+const [toast, setToast] = useState({ msg:””, show:false });
+const [loading, setLoading] = useState(true);
+const toastTimer = useRef(null);
+
+useEffect(() => {
+const load = async () => {
+try {
+const r = await window.storage.get(“paulofit-” + TODAY);
+if (r) {
+const d = JSON.parse(r.value);
+setFoods(d.foods || []);
+setDayType(d.dayType || “rest”);
+setWorkoutType(d.workoutType || “”);
+setCreatina(d.creatina || false);
+}
+} catch(e) {}
+setLoading(false);
+};
+load();
+}, []);
+
+const persist = async (f, dt, wt, cr) => {
+try {
+await window.storage.set(“paulofit-” + TODAY, JSON.stringify({ foods:f, dayType:dt, workoutType:wt, creatina:cr }));
+} catch(e) {}
+};
+
+const metas = dayType===“workout”
+? { kcal:1780, prot:180, carbo:200, gord:60 }
+: { kcal:1780, prot:130, carbo:180, gord:60 };
+
+const totals = foods.reduce((a,f) => ({
+kcal:a.kcal+f.kcal, prot:a.prot+f.prot, carbo:a.carbo+f.carbo, gord:a.gord+f.gord
+}), { kcal:0, prot:0, carbo:0, gord:0 });
+
+const showToast = (msg) => {
+if (toastTimer.current) clearTimeout(toastTimer.current);
+setToast({ msg, show:true });
+toastTimer.current = setTimeout(() => setToast(t => ({…t,show:false})), 2200);
+};
+
+const dateStr = () => {
+const days=[“Domingo”,“Segunda”,“Terça”,“Quarta”,“Quinta”,“Sexta”,“Sábado”];
+const months=[“Jan”,“Fev”,“Mar”,“Abr”,“Mai”,“Jun”,“Jul”,“Ago”,“Set”,“Out”,“Nov”,“Dez”];
+const d=new Date();
+return `${days[d.getDay()]} · ${d.getDate()} ${months[d.getMonth()]}`;
+};
+
+const kcalPct = Math.min(totals.kcal/metas.kcal,1);
+const protPct = Math.min(totals.prot/metas.prot,1);
+const preview = selFav && qty ? calcMacros(selFav, parseFloat(qty)) : null;
+
+const addFood = () => {
+if (!selFav || !qty) return;
+const q = parseFloat(qty);
+const m = calcMacros(selFav, q);
+if (!m) return;
+const nf = […foods, { id:Date.now(), name:selFav.name, emoji:selFav.emoji, meal:selMeal, qty:q, unit:selFav.unit, …m }];
+setFoods(nf); persist(nf, dayType, workoutType, creatina);
+setModal(null); setSelFav(null); setQty(””);
+showToast(`${selFav.emoji} ${selFav.name} adicionado!`);
+};
+
+const removeFood = (id) => {
+const nf = foods.filter(f=>f.id!==id);
+setFoods(nf); persist(nf, dayType, workoutType, creatina);
+showToast(“Removido”);
+};
+
+const confirmDay = () => {
+setDayType(tempDay); setWorkoutType(tempWo); setModal(null);
+persist(foods, tempDay, tempWo, creatina);
+showToast(“Tipo de dia atualizado!”);
+};
+
+const toggleCreatina = () => {
+const nc = !creatina; setCreatina(nc);
+persist(foods, dayType, workoutType, nc);
+showToast(nc?“⚡ Creatina registrada!”:“Creatina desmarcada”);
+};
+
+const mealGroups = {};
+foods.forEach(f => { if(!mealGroups[f.meal]) mealGroups[f.meal]=[]; mealGroups[f.meal].push(f); });
+
+const C = {
+lime:”#d4f53c”, blue:”#3cd4f5”, orange:”#ff6b2b”, pink:”#f53c8a”,
+bg:”#080808”, s1:”#111”, s2:”#1a1a1a”, b1:”#1e1e1e”, b2:”#222”, t1:”#f5f5f5”, t2:”#555”, t3:”#333”,
+};
+
+const BC = `@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800;900&family=Barlow:wght@400;500;600&display=swap'); *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;} ::-webkit-scrollbar{width:0;} .fc{background:${C.s2};border:1px solid ${C.b1};border-radius:10px;padding:10px;cursor:pointer;transition:all 0.15s;text-align:left;} .fc:active{transform:scale(0.97);} .fc.s{border-color:${C.lime};background:#0e1408;} .mc{padding:5px 12px;border-radius:99px;border:1px solid ${C.b2};background:transparent;color:${C.t2};font-family:'Barlow',sans-serif;font-size:0.65rem;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all 0.15s;white-space:nowrap;} .mc.a{background:${C.lime};border-color:${C.lime};color:#000;} .do{background:${C.s2};border:1px solid ${C.b1};border-radius:10px;padding:14px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:all 0.15s;margin-bottom:8px;} .do.s{border-color:${C.lime};background:#0e1408;} .do:active{transform:scale(0.97);} .wc{padding:7px 14px;border-radius:99px;border:1px solid ${C.b2};background:transparent;color:${C.t2};font-size:0.72rem;font-weight:600;cursor:pointer;font-family:'Barlow',sans-serif;transition:all 0.15s;margin-bottom:6px;} .wc.a{background:${C.orange};border-color:${C.orange};color:#fff;} .ni{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 4px;border:none;background:none;color:#2a2a2a;font-family:'Barlow',sans-serif;font-size:0.58rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;cursor:pointer;transition:color 0.2s;} .ni.a{color:${C.lime};} .ni svg{width:20px;height:20px;} .ab{display:flex;align-items:center;gap:5px;background:${C.lime};color:#000;border:none;border-radius:99px;padding:6px 14px;font-family:'Barlow',sans-serif;font-size:0.72rem;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:transform 0.1s;} .ab:active{transform:scale(0.95);} .cb{width:100%;background:${C.lime};color:#000;border:none;border-radius:10px;padding:14px;font-family:'Barlow',sans-serif;font-size:0.85rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;cursor:pointer;transition:all 0.15s;margin-top:10px;} .cb:disabled{opacity:0.25;cursor:not-allowed;} .cb:not(:disabled):active{transform:scale(0.98);} .fd{background:none;border:none;color:#2a2a2a;font-size:0.85rem;cursor:pointer;padding:4px;border-radius:6px;flex-shrink:0;transition:color 0.2s;} .fd:active{color:${C.orange};} .gin{flex:1;background:${C.s2};border:1px solid ${C.b2};border-radius:10px;padding:12px 14px;font-family:'Barlow Condensed',sans-serif;font-size:1.5rem;font-weight:700;color:${C.t1};outline:none;transition:border-color 0.2s;} .gin:focus{border-color:${C.lime};}`;
+
+if (loading) return (
+<div style={{background:C.bg,minHeight:“100vh”,display:“flex”,alignItems:“center”,justifyContent:“center”}}>
+<style>{BC}</style>
+<div style={{color:C.lime,fontFamily:”‘Barlow Condensed’,sans-serif”,fontSize:“1rem”,letterSpacing:3,textTransform:“uppercase”}}>Carregando…</div>
+</div>
+);
+
+return (
+<div style={{fontFamily:”‘Barlow’,sans-serif”,background:C.bg,color:C.t1,minHeight:“100vh”,maxWidth:480,margin:“0 auto”,position:“relative”}}>
+<style>{BC}</style>
+
+```
+  {tab==="home" && (
+    <div style={{paddingBottom:72}}>
+      <div style={{padding:"18px 14px 10px"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1.9rem",fontWeight:900,textTransform:"uppercase",letterSpacing:1,lineHeight:1}}>
+          Paulo <span style={{color:C.lime}}>Fit</span>
+        </div>
+        <div style={{fontSize:"0.62rem",color:"#333",textTransform:"uppercase",letterSpacing:"1.5px",marginTop:3}}>{dateStr()}</div>
+      </div>
+
+      {/* DAY BANNER */}
+      <div onClick={()=>{setTempDay(dayType);setTempWo(workoutType);setModal("day");}}
+        style={{margin:"0 12px 10px",borderRadius:14,padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",border:`1px solid ${dayType==="workout"?"#1a3a1a":"#2a2000"}`,background:dayType==="workout"?"linear-gradient(135deg,#0d1f0d,#111)":"linear-gradient(135deg,#1a1208,#111)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:"1.4rem"}}>{dayType==="workout"?"💪":"😴"}</div>
+          <div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"0.95rem",fontWeight:800,textTransform:"uppercase",letterSpacing:1}}>{dayType==="workout"?(workoutType||"Dia de Treino"):"Dia de Descanso"}</div>
+            <div style={{fontSize:"0.62rem",color:"#555",marginTop:1}}>Meta: {metas.kcal} kcal · ~{metas.prot}g prot</div>
+          </div>
+        </div>
+        <div style={{fontSize:"0.58rem",color:"#333",textDecoration:"underline",textTransform:"uppercase",letterSpacing:1}}>Alterar</div>
+      </div>
+
+      {/* RING */}
+      <div style={{margin:"0 12px 10px",background:C.s1,border:`1px solid ${C.b1}`,borderRadius:14,padding:14,display:"flex",alignItems:"center",gap:14}}>
+        <div style={{position:"relative",flexShrink:0}}>
+          <svg width="92" height="92" viewBox="0 0 92 92" style={{transform:"rotate(-90deg)"}}>
+            <circle cx="46" cy="46" r="38" fill="none" stroke={C.b1} strokeWidth="7"/>
+            <circle cx="46" cy="46" r="38" fill="none" stroke={C.lime} strokeWidth="7"
+              strokeDasharray="239" strokeDashoffset={239*(1-kcalPct)} strokeLinecap="round"
+              style={{transition:"stroke-dashoffset 0.8s cubic-bezier(0.16,1,0.3,1)"}}/>
+            <circle cx="46" cy="46" r="27" fill="none" stroke="#141414" strokeWidth="6"/>
+            <circle cx="46" cy="46" r="27" fill="none" stroke={C.blue} strokeWidth="6"
+              strokeDasharray="170" strokeDashoffset={170*(1-protPct)} strokeLinecap="round"
+              style={{transition:"stroke-dashoffset 0.8s cubic-bezier(0.16,1,0.3,1)"}}/>
+          </svg>
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1.3rem",fontWeight:900,color:C.lime,lineHeight:1}}>{Math.round(totals.kcal)}</div>
+            <div style={{fontSize:"0.48rem",color:"#333",textTransform:"uppercase",letterSpacing:1}}>kcal</div>
+          </div>
+        </div>
+        <div style={{flex:1,display:"flex",flexDirection:"column",gap:7}}>
+          {[
+            {n:"Proteína",v:totals.prot,m:metas.prot,c:C.blue},
+            {n:"Carbo",v:totals.carbo,m:metas.carbo,c:C.orange},
+            {n:"Gordura",v:totals.gord,m:metas.gord,c:C.pink},
+          ].map(s=>(
+            <div key={s.n}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:2}}>
+                <span style={{fontSize:"0.58rem",color:C.t2,textTransform:"uppercase",letterSpacing:1}}>{s.n}</span>
+                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"0.82rem",fontWeight:700,color:s.c}}>{s.v.toFixed(0)}g</span>
+              </div>
+              <div style={{height:3,background:C.b1,borderRadius:99,overflow:"hidden"}}>
+                <div style={{height:"100%",width:Math.min(s.v/s.m*100,100)+"%",background:s.c,borderRadius:99,transition:"width 0.8s cubic-bezier(0.16,1,0.3,1)"}}/>
+              </div>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontSize:"0.58rem",color:C.t2,textTransform:"uppercase",letterSpacing:1}}>Restam</span>
+            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"0.82rem",fontWeight:700,color:C.lime}}>{Math.max(0,Math.round(metas.kcal-totals.kcal))} kcal</span>
+          </div>
+        </div>
+      </div>
+
+      {/* CREATINA */}
+      <div onClick={toggleCreatina}
+        style={{margin:"0 12px 10px",background:creatina?"#0a1200":C.s1,border:`1px solid ${creatina?C.lime:C.b1}`,borderRadius:14,padding:"11px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",transition:"all 0.2s"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:"1.1rem"}}>⚡</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:"0.8rem"}}>Creatina</div>
+            <div style={{fontSize:"0.62rem",color:C.t2,marginTop:1}}>{creatina?"Tomada hoje ✓":"Não tomada hoje"}</div>
+          </div>
+        </div>
+        <div style={{width:36,height:20,background:creatina?C.lime:C.b1,borderRadius:99,position:"relative",transition:"background 0.3s",flexShrink:0}}>
+          <div style={{position:"absolute",top:2,left:creatina?16:2,width:16,height:16,background:"#fff",borderRadius:"50%",transition:"left 0.3s cubic-bezier(0.34,1.56,0.64,1)"}}/>
+        </div>
+      </div>
+
+      {/* FOOD */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 12px",marginBottom:8}}>
+        <div style={{fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:2,color:C.t3,fontWeight:600}}>Refeições de hoje</div>
+        <button className="ab" onClick={()=>{setSelFav(null);setQty("");setSelMeal(MEALS[1]);setModal("add");}}>+ Adicionar</button>
+      </div>
+
+      <div style={{padding:"0 12px",display:"flex",flexDirection:"column",gap:4,marginBottom:16}}>
+        {foods.length===0 ? (
+          <div style={{textAlign:"center",padding:"28px 16px",color:C.t3}}>
+            <div style={{fontSize:"2rem",marginBottom:6}}>🍽️</div>
+            <div style={{fontSize:"0.78rem",fontWeight:600,marginBottom:3,color:"#444"}}>Nada registrado ainda</div>
+            <div style={{fontSize:"0.68rem"}}>Toque em + Adicionar para começar</div>
+          </div>
+        ) : MEALS.map(meal => {
+          const items = mealGroups[meal];
+          if (!items) return null;
+          return (
+            <div key={meal}>
+              <div style={{fontSize:"0.55rem",textTransform:"uppercase",letterSpacing:2,color:"#2a2a2a",padding:"6px 2px 4px",borderBottom:`1px solid #161616`,marginBottom:4}}>{meal}</div>
+              {items.map(f=>(
+                <div key={f.id} style={{background:C.s1,border:`1px solid ${C.b1}`,borderRadius:10,padding:"9px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,marginBottom:4}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:600,fontSize:"0.8rem",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f.emoji} {f.name}</div>
+                    <div style={{fontSize:"0.6rem",color:"#444",marginTop:1}}>{f.qty} {f.unit}</div>
+                  </div>
+                  <div style={{display:"flex",gap:5,flexShrink:0}}>
+                    {[{v:Math.round(f.kcal),l:"kcal",c:C.lime},{v:f.prot.toFixed(1)+"g",l:"prot",c:C.blue},{v:f.carbo.toFixed(1)+"g",l:"carbo",c:C.orange},{v:f.gord.toFixed(1)+"g",l:"gord",c:C.pink}].map(m=>(
+                      <div key={m.l} style={{textAlign:"center",minWidth:26}}>
+                        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"0.82rem",fontWeight:700,color:m.c,lineHeight:1}}>{m.v}</div>
+                        <div style={{fontSize:"0.48rem",color:C.t3,textTransform:"uppercase"}}>{m.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="fd" onClick={()=>removeFood(f.id)}>✕</button>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  )}
+
+  {tab==="stats" && (
+    <div style={{paddingBottom:72}}>
+      <div style={{padding:"18px 14px 10px"}}>
+        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1.9rem",fontWeight:900,textTransform:"uppercase",letterSpacing:1,lineHeight:1}}>
+          Stats <span style={{color:C.lime}}>de Hoje</span>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"0 12px",marginBottom:12}}>
+        {[
+          {l:"Calorias",v:Math.round(totals.kcal),u:"kcal",c:C.lime,s:`Meta: ${metas.kcal}`},
+          {l:"Proteína",v:Math.round(totals.prot),u:"g",c:C.blue,s:`Meta: ${metas.prot}g`},
+          {l:"Carboidrato",v:Math.round(totals.carbo),u:"g",c:C.orange,s:"hoje"},
+          {l:"Gordura",v:Math.round(totals.gord),u:"g",c:C.pink,s:"hoje"},
+        ].map(s=>(
+          <div key={s.l} style={{background:C.s1,border:`1px solid ${C.b1}`,borderRadius:14,padding:14}}>
+            <div style={{fontSize:"0.55rem",textTransform:"uppercase",letterSpacing:"1.5px",color:C.t3,marginBottom:3}}>{s.l}</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1.7rem",fontWeight:900,color:s.c,lineHeight:1}}>{s.v}<span style={{fontSize:"0.62rem",color:C.t2}}> {s.u}</span></div>
+            <div style={{fontSize:"0.6rem",color:"#444",marginTop:3}}>{s.s}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{margin:"0 12px",background:C.s1,border:`1px solid ${C.b1}`,borderRadius:14,padding:16}}>
+        <div style={{fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:2,color:C.t3,marginBottom:12}}>Progresso</div>
+        {[
+          {n:"Proteína",v:totals.prot,m:metas.prot,c:C.blue},
+          {n:"Carboidrato",v:totals.carbo,m:metas.carbo,c:C.orange},
+          {n:"Gordura",v:totals.gord,m:metas.gord,c:C.pink},
+          {n:"Calorias",v:totals.kcal,m:metas.kcal,c:C.lime},
+        ].map(s=>(
+          <div key={s.n} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <span style={{fontSize:"0.6rem",color:"#444",textTransform:"uppercase",letterSpacing:1}}>{s.n}</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"0.82rem",color:s.c}}>{s.v.toFixed(0)} / {s.m}</span>
+            </div>
+            <div style={{height:4,background:"#1a1a1a",borderRadius:99,overflow:"hidden"}}>
+              <div style={{height:"100%",width:Math.min(s.v/s.m*100,100)+"%",background:s.c,borderRadius:99,transition:"width 0.8s cubic-bezier(0.16,1,0.3,1)"}}/>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
+
+  {/* NAV */}
+  <nav style={{display:"flex",borderTop:`1px solid #161616`,background:"rgba(8,8,8,0.97)",position:"fixed",bottom:0,left:0,right:0,maxWidth:480,margin:"0 auto",zIndex:50}}>
+    {[
+      {id:"home",label:"Início",icon:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>},
+      {id:"stats",label:"Stats",icon:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>},
+    ].map(n=>(
+      <button key={n.id} className={`ni${tab===n.id?" a":""}`} onClick={()=>setTab(n.id)}>
+        {n.icon}{n.label}
+      </button>
+    ))}
+  </nav>
+
+  {/* MODAL ADD */}
+  {modal==="add" && (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",backdropFilter:"blur(8px)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+      onClick={e=>{if(e.target===e.currentTarget)setModal(null);}}>
+      <div style={{background:"#131313",border:`1px solid ${C.b2}`,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,padding:"16px 14px 28px",maxHeight:"88vh",overflowY:"auto"}}>
+        <div style={{width:30,height:3,background:C.b2,borderRadius:99,margin:"0 auto 14px"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1.2rem",fontWeight:800,textTransform:"uppercase",letterSpacing:1}}>Adicionar Alimento</div>
+          <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:C.t2,fontSize:"1.1rem",cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:1.5,color:C.t2,marginBottom:5}}>Refeição</div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
+          {MEALS.map(m=>(
+            <button key={m} className={`mc${selMeal===m?" a":""}`} onClick={()=>setSelMeal(m)}>{m}</button>
+          ))}
+        </div>
+        <div style={{fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:1.5,color:C.t2,marginBottom:5}}>Favoritos</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:12}}>
+          {FAVORITES.map(f=>(
+            <div key={f.id} className={`fc${selFav?.id===f.id?" s":""}`} onClick={()=>{setSelFav(f);setQty("");}}>
+              <div style={{fontSize:"1.1rem",marginBottom:2}}>{f.emoji}</div>
+              <div style={{fontSize:"0.72rem",fontWeight:600,lineHeight:1.2}}>{f.name}</div>
+              <div style={{fontSize:"0.55rem",color:C.t2,marginTop:2}}>
+                {f.unit==="un"?`${f.perUnit.kcal}kcal/un`:`${f.per100.kcal}kcal/100g`}
+              </div>
+            </div>
+          ))}
+        </div>
+        {selFav && (
+          <div>
+            <div style={{fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:1.5,color:C.t2,marginBottom:5}}>
+              {selFav.emoji} {selFav.name} — quantidade
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+              <input className="gin" type="number" placeholder="0" value={qty} onChange={e=>setQty(e.target.value)} autoFocus/>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1rem",color:C.t2}}>{selFav.unit==="un"?"un":"g"}</span>
+            </div>
+            {preview && (
+              <div style={{background:C.s2,border:`1px solid ${C.b1}`,borderRadius:10,padding:"9px 12px",display:"flex",justifyContent:"space-around",marginBottom:2}}>
+                {[{v:preview.kcal,l:"kcal",c:C.lime},{v:preview.prot+"g",l:"prot",c:C.blue},{v:preview.carbo+"g",l:"carbo",c:C.orange},{v:preview.gord+"g",l:"gord",c:C.pink}].map(p=>(
+                  <div key={p.l} style={{textAlign:"center"}}>
+                    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1rem",fontWeight:700,color:p.c,lineHeight:1}}>{p.v}</div>
+                    <div style={{fontSize:"0.52rem",color:C.t2,textTransform:"uppercase",marginTop:2}}>{p.l}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="cb" disabled={!qty||parseFloat(qty)<=0} onClick={addFood}>Adicionar</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )}
+
+  {/* MODAL DAY */}
+  {modal==="day" && (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",backdropFilter:"blur(8px)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+      onClick={e=>{if(e.target===e.currentTarget)setModal(null);}}>
+      <div style={{background:"#131313",border:`1px solid ${C.b2}`,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,padding:"16px 14px 28px"}}>
+        <div style={{width:30,height:3,background:C.b2,borderRadius:99,margin:"0 auto 14px"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:"1.2rem",fontWeight:800,textTransform:"uppercase",letterSpacing:1}}>Tipo de Dia</div>
+          <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:C.t2,fontSize:"1.1rem",cursor:"pointer"}}>✕</button>
+        </div>
+        {[{t:"rest",e:"😴",ti:"Dia de Descanso",s:"Meta: 1.780 kcal · ~130g proteína"},{t:"workout",e:"💪",ti:"Dia de Treino",s:"Meta: 1.780 kcal · ~180g proteína"}].map(o=>(
+          <div key={o.t} className={`do${tempDay===o.t?" s":""}`} onClick={()=>setTempDay(o.t)}>
+            <div style={{fontSize:"1.4rem"}}>{o.e}</div>
+            <div><div style={{fontWeight:700,fontSize:"0.85rem"}}>{o.ti}</div><div style={{fontSize:"0.62rem",color:C.t2,marginTop:2}}>{o.s}</div></div>
+          </div>
+        ))}
+        {tempDay==="workout" && (
+          <>
+            <div style={{fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:1.5,color:C.t2,margin:"10px 0 6px"}}>Tipo de treino</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {["Musculação","Cardio","Musculação + Cardio"].map(w=>(
+                <button key={w} className={`wc${tempWo===w?" a":""}`} onClick={()=>setTempWo(w)}>
+                  {w==="Musculação"?"🏋️ Musculação":w==="Cardio"?"🏃 Cardio":"⚡ Ambos"}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <button className="cb" onClick={confirmDay}>Confirmar</button>
+      </div>
+    </div>
+  )}
+
+  {/* TOAST */}
+  <div style={{position:"fixed",bottom:80,left:"50%",transform:`translateX(-50%) translateY(${toast.show?0:8}px)`,background:"#1e1e1e",border:`1px solid ${C.b2}`,borderRadius:99,padding:"7px 16px",fontSize:"0.72rem",fontWeight:600,whiteSpace:"nowrap",opacity:toast.show?1:0,transition:"all 0.3s cubic-bezier(0.16,1,0.3,1)",zIndex:200,pointerEvents:"none"}}>
+    {toast.msg}
+  </div>
+</div>
+```
+
+);
+}
